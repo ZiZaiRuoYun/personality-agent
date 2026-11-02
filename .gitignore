@@ -1,0 +1,119 @@
+# =========================
+# Python
+# =========================
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Native extensions
+*.so
+*.pyd
+*.dll
+
+# =========================
+# Virtual environments
+# =========================
+
+.venv/
+venv/
+env/
+ENV/
+
+# =========================
+# uv / Python tooling
+# =========================
+
+# Keep these tracked:
+# pyproject.toml
+# uv.lock
+# .python-version
+
+# =========================
+# Environment variables / secrets
+# =========================
+
+.env
+.env.*
+!.env.example
+
+# =========================
+# Personality Agent runtime data
+# =========================
+
+# Local SQLite databases
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+
+# SQLite temporary files
+data/*.db-shm
+data/*.db-wal
+data/*.db-journal
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/*.sqlite-journal
+
+# Keep the empty data directory in Git if using .gitkeep
+!data/.gitkeep
+
+# =========================
+# Testing / coverage
+# =========================
+
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# =========================
+# Type checking / lint caches
+# =========================
+
+.mypy_cache/
+.pyright/
+.ruff_cache/
+
+# =========================
+# Build / packaging
+# =========================
+
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# =========================
+# VS Code
+# =========================
+
+.vscode/
+
+# =========================
+# JetBrains IDEs
+# =========================
+
+.idea/
+
+# =========================
+# Windows
+# =========================
+
+Thumbs.db
+Desktop.ini
+
+# =========================
+# macOS
+# =========================
+
+.DS_Store
+
+# =========================
+# Logs / temporary files
+# =========================
+
+*.log
+*.tmp
+*.temp
+~$*
