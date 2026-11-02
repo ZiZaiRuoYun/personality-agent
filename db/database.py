@@ -5,6 +5,8 @@ from pathlib import Path
 from models.event import Event
 from models.state import AgentState
 from models.relationship import RelationshipState
+from models.memory import Memory
+from models.memory_source import MemorySource
 
 
 # 项目根目录
@@ -23,15 +25,23 @@ def get_connection() -> sqlite3.Connection:
     创建 SQLite 数据库连接。
     """
 
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    DATA_DIR.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
-    connection = sqlite3.connect(DATABASE_PATH)
+    connection = sqlite3.connect(
+        DATABASE_PATH
+    )
 
-    # 让查询结果可以使用 row["column"] 形式读取
     connection.row_factory = sqlite3.Row
 
-    return connection
+    # SQLite 默认不会强制执行 Foreign Key。
+    connection.execute(
+        "PRAGMA foreign_keys = ON"
+    )
 
+    return connection
 
 def initialize_database() -> None:
     """
@@ -276,3 +286,172 @@ def save_relationship(
     with get_connection() as connection:
         connection.execute(sql, values)
         connection.commit()
+
+
+def save_memory(
+    memory: Memory,
+    source: MemorySource,
+) -> None:
+    """
+    保存 Memory 及其来源。
+
+    两条记录必须放在同一个 transaction 中，
+    避免出现 Memory 写成功但 MemorySource 写失败的情况。
+    """
+
+    memory_sql = """
+    INSERT INTO memories (
+        memory_id,
+        memory_type,
+        subject_id,
+        content,
+        epistemic_status,
+        confidence,
+        importance,
+        future_utility,
+        relationship_relevance,
+        statement_strength,
+        observed_at,
+        temporal_scope,
+        valid_from,
+        valid_until,
+        modality,
+        fact_status,
+        created_at,
+        access_count,
+        last_accessed_at
+    )
+    VALUES (
+        ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
+    """
+
+    memory_values = (
+        memory.memory_id,
+        memory.memory_type,
+        memory.subject_id,
+        memory.content,
+        memory.epistemic_status,
+        memory.confidence,
+        memory.importance,
+        memory.future_utility,
+        memory.relationship_relevance,
+        memory.statement_strength,
+        (
+            memory.observed_at.isoformat()
+            if memory.observed_at
+            else None
+        ),
+        memory.temporal_scope,
+        (
+            memory.valid_from.isoformat()
+            if memory.valid_from
+            else None
+        ),
+        (
+            memory.valid_until.isoformat()
+            if memory.valid_until
+            else None
+        ),
+        memory.modality,
+        memory.fact_status,
+        memory.created_at.isoformat(),
+        memory.access_count,
+        (
+            memory.last_accessed_at.isoformat()
+            if memory.last_accessed_at
+            else None
+        ),
+    )
+
+    source_sql = """
+    INSERT INTO memory_sources (
+        memory_id,
+        event_id,
+        root_cause_id,
+        source_role,
+        contribution_weight,
+        created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?)
+    """
+
+    source_values = (
+        source.memory_id,
+        source.event_id,
+        source.root_cause_id,
+        source.source_role,
+        source.contribution_weight,
+        source.created_at.isoformat(),
+    )
+
+    with get_connection() as connection:
+        try:
+            connection.execute(
+                memory_sql,
+                memory_values,
+            )
+
+            connection.execute(
+                source_sql,
+                source_values,
+            )
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+
+
+def get_recent_memories(
+    limit: int = 10,
+) -> list[dict]:
+    """
+    获取最近的长期记忆。
+    """
+
+    sql = """
+    SELECT *
+    FROM memories
+    ORDER BY created_at DESC
+    LIMIT ?
+    """
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            sql,
+            (limit,),
+        ).fetchall()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
+def get_memory_sources(
+    memory_id: str,
+) -> list[dict]:
+    """
+    获取某个 Memory 的所有来源。
+    """
+
+    sql = """
+    SELECT *
+    FROM memory_sources
+    WHERE memory_id = ?
+    ORDER BY created_at ASC
+    """
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            sql,
+            (memory_id,),
+        ).fetchall()
+
+    return [
+        dict(row)
+        for row in rows
+    ]

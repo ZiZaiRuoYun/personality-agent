@@ -66,3 +66,81 @@ CREATE TABLE IF NOT EXISTS relationships (
 
     updated_at TEXT NOT NULL
 );
+
+
+CREATE TABLE IF NOT EXISTS memories (
+    memory_id TEXT PRIMARY KEY,
+
+    memory_type TEXT NOT NULL,
+
+    subject_id TEXT,
+
+    content TEXT NOT NULL,
+
+    epistemic_status TEXT NOT NULL,
+
+    confidence REAL NOT NULL,
+
+    importance REAL NOT NULL,
+    future_utility REAL NOT NULL,
+    relationship_relevance REAL NOT NULL,
+
+    statement_strength INTEGER NOT NULL,
+
+    observed_at TEXT,
+
+    temporal_scope TEXT NOT NULL,
+
+    valid_from TEXT,
+    valid_until TEXT,
+
+    modality TEXT NOT NULL,
+    fact_status TEXT NOT NULL,
+
+    created_at TEXT NOT NULL,
+
+    access_count INTEGER NOT NULL DEFAULT 0,
+
+    last_accessed_at TEXT
+);
+
+
+CREATE TABLE IF NOT EXISTS memory_sources (
+    memory_id TEXT NOT NULL,
+
+    event_id TEXT NOT NULL,
+    root_cause_id TEXT NOT NULL,
+
+    source_role TEXT NOT NULL,
+    contribution_weight REAL NOT NULL,
+
+    created_at TEXT NOT NULL,
+
+    PRIMARY KEY (memory_id, event_id),
+
+    FOREIGN KEY (memory_id)
+        REFERENCES memories(memory_id),
+
+    FOREIGN KEY (event_id)
+        REFERENCES events(event_id)
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_memories_type
+ON memories(memory_type);
+
+
+CREATE INDEX IF NOT EXISTS idx_memories_subject
+ON memories(subject_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_memories_created_at
+ON memories(created_at);
+
+
+CREATE INDEX IF NOT EXISTS idx_memory_sources_root
+ON memory_sources(root_cause_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_memory_sources_event
+ON memory_sources(event_id);

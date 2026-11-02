@@ -1,23 +1,40 @@
 from db.database import (
     DATABASE_PATH,
     get_recent_events,
+    get_recent_memories,
     initialize_database,
     load_agent_state,
     load_relationship,
     save_agent_state,
     save_event,
+    save_memory,
     save_relationship,
 )
 
+from llm.base import LLMClient
+from llm.factory import create_llm_client
+
+from memory.analyzer import (
+    analyze_event_memory,
+)
+
+from memory.engine import (
+    create_memory_from_candidate,
+)
+
 from models.event import Event
-from models.relationship import RelationshipState
+from models.relationship import (
+    RelationshipState,
+)
 from models.state import AgentState
 
 from relationship.engine import (
     apply_event_to_relationship,
 )
 
-from state.engine import apply_event_to_state
+from state.engine import (
+    apply_event_to_state,
+)
 
 
 USER_ID = "user_001"
@@ -26,10 +43,6 @@ USER_ID = "user_001"
 def create_user_message_event(
     message: str,
 ) -> Event:
-    """
-    将用户输入转换成统一 Event。
-    """
-
     return Event(
         event_type="user_message",
         source="user",
@@ -42,7 +55,9 @@ def create_user_message_event(
 
 
 def print_recent_events() -> None:
-    events = get_recent_events(limit=5)
+    events = get_recent_events(
+        limit=5
+    )
 
     if not events:
         print("\nNo events found.")
@@ -58,10 +73,55 @@ def print_recent_events() -> None:
         )
 
 
+def print_memories() -> None:
+    memories = get_recent_memories(
+        limit=10
+    )
+
+    if not memories:
+        print("\nNo memories found.")
+        return
+
+    print("\nRecent Memories:")
+
+    for memory in memories:
+        print(
+            f"- [{memory['memory_type']}] "
+            f"{memory['content']}"
+        )
+
+        print(
+            f"    memory_id="
+            f"{memory['memory_id']}"
+        )
+
+        print(
+            f"    confidence="
+            f"{memory['confidence']:.2f}, "
+            f"strength="
+            f"{memory['statement_strength']}"
+        )
+
+        print(
+            f"    importance="
+            f"{memory['importance']:.2f}, "
+            f"utility="
+            f"{memory['future_utility']:.2f}"
+        )
+
+        print(
+            f"    temporal_scope="
+            f"{memory['temporal_scope']}, "
+            f"modality="
+            f"{memory['modality']}, "
+            f"fact_status="
+            f"{memory['fact_status']}"
+        )
+
+
 def print_state(
     state: AgentState,
 ) -> None:
-
     print("\nCurrent Agent State:")
 
     print(
@@ -89,16 +149,10 @@ def print_state(
         f"{state.disappointment:.2f}"
     )
 
-    print(
-        f"  updated_at      = "
-        f"{state.updated_at}"
-    )
-
 
 def print_relationship(
     relationship: RelationshipState,
 ) -> None:
-
     print("\nCurrent Relationship:")
 
     print(
@@ -131,10 +185,71 @@ def print_relationship(
         f"{relationship.interaction_count}"
     )
 
-    print(
-        f"  last_interaction  = "
-        f"{relationship.last_interaction_at}"
-    )
+
+def process_memory(
+    event: Event,
+    llm_client: LLMClient,
+) -> None:
+    try:
+        analysis = analyze_event_memory(
+            event,
+            llm_client,
+        )
+
+    except Exception as exc:
+        print(
+            "\n[Memory Analyzer Error]"
+        )
+
+        print(
+            f"{type(exc).__name__}: "
+            f"{exc}"
+        )
+
+        return
+
+    if not analysis.memory_worthy:
+        print(
+            "\nMemory Analyzer: "
+            "nothing worth storing."
+        )
+        return
+
+    print("\nMemory Analyzer:")
+
+    for candidate in analysis.memories:
+        try:
+            memory, source = (
+                create_memory_from_candidate(
+                    event,
+                    candidate,
+                )
+            )
+
+            save_memory(
+                memory,
+                source,
+            )
+
+            print(
+                f"  + "
+                f"[{memory.memory_type}] "
+                f"{memory.content}"
+            )
+
+            print(
+                f"    strength="
+                f"{memory.statement_strength}, "
+                f"confidence="
+                f"{memory.confidence:.2f}"
+            )
+
+        except Exception as exc:
+            print(
+                "  [Memory Save Error] "
+                f"{type(exc).__name__}: "
+                f"{exc}"
+            )
 
 
 def main() -> None:
@@ -146,12 +261,32 @@ def main() -> None:
         USER_ID
     )
 
-    print("=" * 50)
-    print("Personality Agent MVP v0.1")
+    try:
+        llm_client = create_llm_client()
+
+    except Exception as exc:
+        print(
+            "\nLLM configuration error:"
+        )
+
+        print(
+            f"{type(exc).__name__}: "
+            f"{exc}"
+        )
+
+        return
+
     print("=" * 50)
 
     print(
-        f"\nDatabase: {DATABASE_PATH}"
+        "Personality Agent MVP v0.1"
+    )
+
+    print("=" * 50)
+
+    print(
+        f"\nDatabase: "
+        f"{DATABASE_PATH}"
     )
 
     print(
@@ -159,6 +294,7 @@ def main() -> None:
         "  /history       Show recent events\n"
         "  /state         Show current agent state\n"
         "  /relationship  Show relationship state\n"
+        "  /memories      Show recent memories\n"
         "  /exit          Exit program"
     )
 
@@ -189,15 +325,25 @@ def main() -> None:
                 )
                 continue
 
-            event = create_user_message_event(
-                message
+            if message == "/memories":
+                print_memories()
+                continue
+
+            event = (
+                create_user_message_event(
+                    message
+                )
             )
 
-            save_event(event)
+            save_event(
+                event
+            )
 
-            state = apply_event_to_state(
-                state,
-                event,
+            state = (
+                apply_event_to_state(
+                    state,
+                    event,
+                )
             )
 
             save_agent_state(
@@ -227,10 +373,9 @@ def main() -> None:
                 f"{event.root_cause_id}"
             )
 
-            print_state(state)
-
-            print_relationship(
-                relationship
+            process_memory(
+                event,
+                llm_client,
             )
 
         except KeyboardInterrupt:

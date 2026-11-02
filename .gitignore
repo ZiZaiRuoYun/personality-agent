@@ -6,10 +6,10 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-# Native extensions
 *.so
 *.pyd
 *.dll
+
 
 # =========================
 # Virtual environments
@@ -20,45 +20,59 @@ venv/
 env/
 ENV/
 
+
 # =========================
-# uv / Python tooling
+# Python / uv
 # =========================
 
-# Keep these tracked:
+# These SHOULD stay tracked:
 # pyproject.toml
 # uv.lock
 # .python-version
 
+
 # =========================
-# Environment variables / secrets
+# Secrets / environment
 # =========================
 
 .env
 .env.*
 !.env.example
 
+*.pem
+*.key
+
+
 # =========================
-# Personality Agent runtime data
+# Personality Agent data
 # =========================
 
-# Local SQLite databases
 data/*.db
 data/*.sqlite
 data/*.sqlite3
 
-# SQLite temporary files
 data/*.db-shm
 data/*.db-wal
 data/*.db-journal
+
 data/*.sqlite-shm
 data/*.sqlite-wal
 data/*.sqlite-journal
 
-# Keep the empty data directory in Git if using .gitkeep
+# Allow Git to preserve empty data directory
 !data/.gitkeep
 
+
 # =========================
-# Testing / coverage
+# Logs
+# =========================
+
+*.log
+logs/
+
+
+# =========================
+# Testing
 # =========================
 
 .pytest_cache/
@@ -67,16 +81,18 @@ data/*.sqlite-journal
 htmlcov/
 coverage.xml
 
+
 # =========================
-# Type checking / lint caches
+# Type checking / lint
 # =========================
 
 .mypy_cache/
 .pyright/
 .ruff_cache/
 
+
 # =========================
-# Build / packaging
+# Build / package artifacts
 # =========================
 
 build/
@@ -84,36 +100,34 @@ dist/
 *.egg-info/
 .eggs/
 
+
 # =========================
 # VS Code
 # =========================
 
 .vscode/
 
+
 # =========================
-# JetBrains IDEs
+# JetBrains
 # =========================
 
 .idea/
 
-# =========================
-# Windows
-# =========================
-
-Thumbs.db
-Desktop.ini
 
 # =========================
-# macOS
+# OS files
 # =========================
 
 .DS_Store
+Thumbs.db
+Desktop.ini
+
 
 # =========================
-# Logs / temporary files
+# Temporary files
 # =========================
 
-*.log
 *.tmp
 *.temp
 ~$*
