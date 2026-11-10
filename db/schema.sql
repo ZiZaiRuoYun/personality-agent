@@ -144,3 +144,138 @@ ON memory_sources(root_cause_id);
 
 CREATE INDEX IF NOT EXISTS idx_memory_sources_event
 ON memory_sources(event_id);
+
+
+CREATE TABLE IF NOT EXISTS claims (
+    claim_id TEXT PRIMARY KEY,
+
+    subject_id TEXT NOT NULL,
+
+    claim_type TEXT NOT NULL,
+
+    canonical_subject TEXT NOT NULL,
+    canonical_predicate TEXT NOT NULL,
+    canonical_object TEXT,
+
+    canonical_text TEXT NOT NULL,
+
+    temporal_mode TEXT NOT NULL,
+
+    value_type TEXT NOT NULL,
+
+    status TEXT NOT NULL,
+
+    created_at TEXT NOT NULL
+);
+
+
+CREATE TABLE IF NOT EXISTS claim_evidence (
+    claim_evidence_id TEXT PRIMARY KEY,
+
+    claim_id TEXT NOT NULL,
+    memory_id TEXT NOT NULL,
+
+    root_cause_id TEXT NOT NULL,
+
+    stance TEXT NOT NULL,
+
+    statement_strength INTEGER NOT NULL,
+
+    memory_confidence REAL NOT NULL,
+    relation_confidence REAL NOT NULL,
+
+    evidence_value INTEGER,
+
+    evidence_label TEXT,
+
+    observed_at TEXT,
+
+    created_at TEXT NOT NULL,
+
+    FOREIGN KEY (claim_id)
+        REFERENCES claims(claim_id),
+
+    FOREIGN KEY (memory_id)
+        REFERENCES memories(memory_id),
+
+    UNIQUE (
+        claim_id,
+        memory_id,
+        root_cause_id
+    )
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_claims_subject
+ON claims(subject_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_claims_predicate
+ON claims(canonical_predicate);
+
+
+CREATE INDEX IF NOT EXISTS idx_claims_status
+ON claims(status);
+
+
+CREATE INDEX IF NOT EXISTS idx_claim_evidence_claim
+ON claim_evidence(claim_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_claim_evidence_memory
+ON claim_evidence(memory_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_claim_evidence_root
+ON claim_evidence(root_cause_id);
+
+
+CREATE TABLE IF NOT EXISTS claim_resolution_log (
+    memory_id TEXT PRIMARY KEY,
+
+    action TEXT NOT NULL,
+
+    reason TEXT,
+
+    resolved_at TEXT NOT NULL,
+
+    FOREIGN KEY (memory_id)
+        REFERENCES memories(memory_id)
+);
+
+
+
+CREATE TABLE IF NOT EXISTS current_beliefs (
+    belief_id TEXT PRIMARY KEY,
+
+    claim_id TEXT NOT NULL UNIQUE,
+
+    belief_type TEXT NOT NULL,
+
+    scalar_value REAL,
+    categorical_value TEXT,
+    boolean_value INTEGER,
+
+    confidence REAL NOT NULL,
+
+    status TEXT NOT NULL,
+
+    evidence_count INTEGER NOT NULL,
+    independent_root_count INTEGER NOT NULL,
+
+    computed_at TEXT NOT NULL,
+
+    resolver_version TEXT NOT NULL,
+
+    FOREIGN KEY (claim_id)
+        REFERENCES claims(claim_id)
+        ON DELETE CASCADE
+);
+
+
+CREATE INDEX IF NOT EXISTS idx_current_beliefs_claim
+ON current_beliefs(claim_id);
+
+
+CREATE INDEX IF NOT EXISTS idx_current_beliefs_status
+ON current_beliefs(status);

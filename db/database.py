@@ -3,10 +3,20 @@ import sqlite3
 from pathlib import Path
 
 from models.event import Event
+
 from models.state import AgentState
+
 from models.relationship import RelationshipState
+
 from models.memory import Memory
 from models.memory_source import MemorySource
+
+from models.claim import Claim
+from models.claim_evidence import ClaimEvidence
+
+from models.current_belief import (
+    CurrentBelief,
+)
 
 
 # 项目根目录
@@ -45,15 +55,105 @@ def get_connection() -> sqlite3.Connection:
 
 def initialize_database() -> None:
     """
-    根据 schema.sql 初始化数据库。
+    根据 schema.sql 初始化数据库，
+    并执行 MVP 所需的轻量 schema migration。
     """
 
-    with open(SCHEMA_PATH, "r", encoding="utf-8") as schema_file:
+    with open(
+        SCHEMA_PATH,
+        "r",
+        encoding="utf-8",
+    ) as schema_file:
         schema_sql = schema_file.read()
 
     with get_connection() as connection:
-        connection.executescript(schema_sql)
+        connection.executescript(
+            schema_sql
+        )
+
+        ensure_schema_migrations(
+            connection
+        )
+
         connection.commit()
+
+
+def get_table_columns(
+    connection: sqlite3.Connection,
+    table_name: str,
+) -> set[str]:
+    """
+    获取 SQLite 表已有字段。
+    """
+
+    rows = connection.execute(
+        f"PRAGMA table_info({table_name})"
+    ).fetchall()
+
+    return {
+        row["name"]
+        for row in rows
+    }
+
+
+def ensure_schema_migrations(
+    connection: sqlite3.Connection,
+) -> None:
+    """
+    MVP 阶段的轻量数据库 Migration。
+    """
+
+    # -------------------------
+    # claim_evidence migrations
+    # -------------------------
+
+    claim_evidence_columns = (
+        get_table_columns(
+            connection,
+            "claim_evidence",
+        )
+    )
+
+    if (
+        "evidence_value"
+        not in claim_evidence_columns
+    ):
+        connection.execute(
+            """
+            ALTER TABLE claim_evidence
+            ADD COLUMN evidence_value INTEGER
+            """
+        )
+
+    if (
+        "evidence_label"
+        not in claim_evidence_columns
+    ):
+        connection.execute(
+            """
+            ALTER TABLE claim_evidence
+            ADD COLUMN evidence_label TEXT
+            """
+        )
+
+    # -------------------------
+    # claims migrations
+    # -------------------------
+
+    claims_columns = get_table_columns(
+        connection,
+        "claims",
+    )
+
+    if "value_type" not in claims_columns:
+        connection.execute(
+            """
+            ALTER TABLE claims
+            ADD COLUMN value_type TEXT
+            NOT NULL
+            DEFAULT 'unstructured'
+            """
+        )
 
 
 def save_event(event: Event) -> None:
@@ -455,3 +555,537 @@ def get_memory_sources(
         dict(row)
         for row in rows
     ]
+
+
+def get_claims_for_subject(
+    subject_id: str,
+    limit: int = 50,
+) -> list[dict]:
+    """
+    获取某个主体当前已有的 Claim。
+    """
+
+    sql = """
+    SELECT *
+    FROM claims
+    WHERE subject_id = ?
+    ORDER BY created_at DESC
+    LIMIT ?
+    """
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            sql,
+            (
+                subject_id,
+                limit,
+            ),
+        ).fetchall()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+def get_claim(
+    claim_id: str,
+) -> dict | None:
+    sql = """
+    SELECT *
+    FROM claims
+    WHERE claim_id = ?
+    """
+
+    with get_connection() as connection:
+        row = connection.execute(
+            sql,
+            (claim_id,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return dict(row)
+
+
+def save_claim_with_evidence(
+    claim: Claim,
+    evidences: list[ClaimEvidence],
+) -> None:
+    """
+    创建新 Claim 时，
+    Claim 与 Evidence 必须处于同一个 transaction。
+    """
+
+    claim_sql = """
+    INSERT INTO claims (
+        claim_id,
+        subject_id,
+        claim_type,
+        canonical_subject,
+        canonical_predicate,
+        canonical_object,
+        canonical_text,
+        temporal_mode,
+        value_type,
+        status,
+        created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    claim_values = (
+        claim.claim_id,
+        claim.subject_id,
+        claim.claim_type,
+        claim.canonical_subject,
+        claim.canonical_predicate,
+        claim.canonical_object,
+        claim.canonical_text,
+        claim.temporal_mode,
+        claim.value_type,
+        claim.status,
+        claim.created_at.isoformat(),
+    )
+
+    evidence_sql = """
+    INSERT INTO claim_evidence (
+        claim_evidence_id,
+        claim_id,
+        memory_id,
+        root_cause_id,
+        stance,
+        statement_strength,
+        memory_confidence,
+        relation_confidence,
+        evidence_value,
+        evidence_label,
+        observed_at,
+        created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    with get_connection() as connection:
+        try:
+            connection.execute(
+                claim_sql,
+                claim_values,
+            )
+
+            for evidence in evidences:
+                evidence_values = (
+                    evidence.claim_evidence_id,
+                    evidence.claim_id,
+                    evidence.memory_id,
+                    evidence.root_cause_id,
+                    evidence.stance,
+                    evidence.statement_strength,
+                    evidence.memory_confidence,
+                    evidence.relation_confidence,
+                    evidence.evidence_value,
+                    evidence.evidence_label,
+                    (
+                        evidence.observed_at.isoformat()
+                        if evidence.observed_at
+                        else None
+                    ),
+                    evidence.created_at.isoformat(),
+                )
+
+                connection.execute(
+                    evidence_sql,
+                    evidence_values,
+                )
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+
+
+def save_claim_evidences(
+    evidences: list[ClaimEvidence],
+) -> None:
+    """
+    给已有 Claim 追加证据。
+    """
+
+    sql = """
+    INSERT INTO claim_evidence (
+        claim_evidence_id,
+        claim_id,
+        memory_id,
+        root_cause_id,
+        stance,
+        statement_strength,
+        memory_confidence,
+        relation_confidence,
+        evidence_value,
+        evidence_label,
+        observed_at,
+        created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """
+
+    with get_connection() as connection:
+        try:
+            for evidence in evidences:
+                values = (
+                    evidence.claim_evidence_id,
+                    evidence.claim_id,
+                    evidence.memory_id,
+                    evidence.root_cause_id,
+                    evidence.stance,
+                    evidence.statement_strength,
+                    evidence.memory_confidence,
+                    evidence.relation_confidence,
+                    evidence.evidence_value,
+                    evidence.evidence_label,
+                    (
+                        evidence.observed_at.isoformat()
+                        if evidence.observed_at
+                        else None
+                    ),
+                    evidence.created_at.isoformat(),
+                )
+
+                connection.execute(
+                    sql,
+                    values,
+                )
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+
+    
+def get_claim_evidence(
+    claim_id: str,
+) -> list[dict]:
+    sql = """
+    SELECT
+        ce.*,
+        m.content AS memory_content,
+        m.temporal_scope,
+        m.modality,
+        m.fact_status
+    FROM claim_evidence ce
+
+    JOIN memories m
+        ON m.memory_id = ce.memory_id
+
+    WHERE ce.claim_id = ?
+
+    ORDER BY ce.created_at ASC
+    """
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            sql,
+            (claim_id,),
+        ).fetchall()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
+def get_unresolved_memories(
+    limit: int = 50,
+) -> list[dict]:
+    """
+    获取尚未经过 Claim Resolver 的 Memory。
+    """
+
+    sql = """
+    SELECT m.*
+    FROM memories m
+
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM claim_resolution_log crl
+        WHERE crl.memory_id = m.memory_id
+    )
+
+    ORDER BY m.created_at ASC
+
+    LIMIT ?
+    """
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            sql,
+            (limit,),
+        ).fetchall()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+
+def get_memory(
+    memory_id: str,
+) -> Memory | None:
+    sql = """
+    SELECT *
+    FROM memories
+    WHERE memory_id = ?
+    """
+
+    with get_connection() as connection:
+        row = connection.execute(
+            sql,
+            (memory_id,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return Memory(
+        memory_id=row["memory_id"],
+        memory_type=row["memory_type"],
+        subject_id=row["subject_id"],
+        content=row["content"],
+        epistemic_status=(
+            row["epistemic_status"]
+        ),
+        confidence=row["confidence"],
+        importance=row["importance"],
+        future_utility=(
+            row["future_utility"]
+        ),
+        relationship_relevance=(
+            row["relationship_relevance"]
+        ),
+        statement_strength=(
+            row["statement_strength"]
+        ),
+        observed_at=row["observed_at"],
+        temporal_scope=(
+            row["temporal_scope"]
+        ),
+        valid_from=row["valid_from"],
+        valid_until=row["valid_until"],
+        modality=row["modality"],
+        fact_status=row["fact_status"],
+        created_at=row["created_at"],
+        access_count=row["access_count"],
+        last_accessed_at=(
+            row["last_accessed_at"]
+        ),
+    )
+
+
+def reset_claim_layer() -> None:
+    """
+    清空 Claim Layer。
+
+    Event 和 Memory 保留。
+    """
+
+    with get_connection() as connection:
+        try:
+            connection.execute(
+                "DELETE FROM current_beliefs"
+            )
+
+            connection.execute(
+                "DELETE FROM claim_evidence"
+            )
+
+            connection.execute(
+                "DELETE FROM claims"
+            )
+
+            connection.execute(
+                "DELETE FROM claim_resolution_log"
+            )
+
+            connection.commit()
+
+        except Exception:
+            connection.rollback()
+            raise
+
+
+def mark_memory_claim_resolved(
+    memory_id: str,
+    action: str,
+    reason: str | None,
+) -> None:
+    """
+    标记某条 Memory 已经过 Claim Resolver。
+    """
+
+    sql = """
+    INSERT INTO claim_resolution_log (
+        memory_id,
+        action,
+        reason,
+        resolved_at
+    )
+    VALUES (
+        ?, ?, ?, CURRENT_TIMESTAMP
+    )
+
+    ON CONFLICT(memory_id)
+    DO UPDATE SET
+        action = excluded.action,
+        reason = excluded.reason,
+        resolved_at = CURRENT_TIMESTAMP
+    """
+
+    with get_connection() as connection:
+        connection.execute(
+            sql,
+            (
+                memory_id,
+                action,
+                reason,
+            ),
+        )
+
+        connection.commit()
+
+
+def save_current_belief(
+    belief: CurrentBelief,
+) -> None:
+    """
+    保存 / 更新一个 Claim 的 Current Belief。
+
+    CurrentBelief 是派生缓存，
+    所以按 claim_id UPSERT。
+    """
+
+    sql = """
+    INSERT INTO current_beliefs (
+        belief_id,
+        claim_id,
+        belief_type,
+        scalar_value,
+        categorical_value,
+        boolean_value,
+        confidence,
+        status,
+        evidence_count,
+        independent_root_count,
+        computed_at,
+        resolver_version
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+
+    ON CONFLICT(claim_id)
+    DO UPDATE SET
+        belief_id = excluded.belief_id,
+        belief_type = excluded.belief_type,
+        scalar_value = excluded.scalar_value,
+        categorical_value = excluded.categorical_value,
+        boolean_value = excluded.boolean_value,
+        confidence = excluded.confidence,
+        status = excluded.status,
+        evidence_count = excluded.evidence_count,
+        independent_root_count = excluded.independent_root_count,
+        computed_at = excluded.computed_at,
+        resolver_version = excluded.resolver_version
+    """
+
+    values = (
+        belief.belief_id,
+        belief.claim_id,
+        belief.belief_type,
+        belief.scalar_value,
+        belief.categorical_value,
+        (
+            int(belief.boolean_value)
+            if belief.boolean_value is not None
+            else None
+        ),
+        belief.confidence,
+        belief.status,
+        belief.evidence_count,
+        belief.independent_root_count,
+        belief.computed_at.isoformat(),
+        belief.resolver_version,
+    )
+
+    with get_connection() as connection:
+        connection.execute(
+            sql,
+            values,
+        )
+
+        connection.commit()
+
+
+def get_current_belief(
+    claim_id: str,
+) -> dict | None:
+    sql = """
+    SELECT *
+    FROM current_beliefs
+    WHERE claim_id = ?
+    """
+
+    with get_connection() as connection:
+        row = connection.execute(
+            sql,
+            (claim_id,),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return dict(row)
+
+
+def get_all_current_beliefs(
+    limit: int = 100,
+) -> list[dict]:
+    sql = """
+    SELECT
+        cb.*,
+        c.canonical_text,
+        c.canonical_predicate,
+        c.value_type
+    FROM current_beliefs cb
+
+    JOIN claims c
+        ON c.claim_id = cb.claim_id
+
+    ORDER BY cb.computed_at DESC
+
+    LIMIT ?
+    """
+
+    with get_connection() as connection:
+        rows = connection.execute(
+            sql,
+            (limit,),
+        ).fetchall()
+
+    return [
+        dict(row)
+        for row in rows
+    ]
+
+def clear_current_beliefs() -> None:
+    """
+    清空所有 Current Belief。
+
+    不影响 Claim / Evidence。
+    """
+
+    with get_connection() as connection:
+        connection.execute(
+            "DELETE FROM current_beliefs"
+        )
+
+        connection.commit()
